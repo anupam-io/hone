@@ -2,7 +2,9 @@
 
 A spec skill that decides from your docs, and makes your docs sharper every time it can't.
 
-hone is a fork of Matt Pocock's [`to-spec`](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-spec) skill with one rule changed: **every decision in the spec must come from the repo's docs.** When the docs can't settle a decision, hone doesn't guess. It logs a blocker. Your answers to those blockers go back into the docs, so the next spec gets it right on its own.
+hone is a fork of Matt Pocock's [`to-spec`](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-spec) skill with one rule changed: **every decision in the spec must come from the repo's docs.** When the docs can't settle a decision, hone doesn't guess. If the decision is hard to reverse, it logs a blocker and asks; otherwise it proposes a default you see before the spec is written. Your answers to blockers go back into the docs, so the next spec gets it right on its own.
+
+Every decision in the spec gets an ID, a source and a check, so a code review can return a verdict per decision.
 
 > Status: v1. The skill is in [`skills/hone/SKILL.md`](skills/hone/SKILL.md). See [`examples/WALKTHROUGH.md`](examples/WALKTHROUGH.md) for one full run.
 
@@ -24,9 +26,11 @@ Then run `/hone <feature>` in the repo.
 | | to-spec | hone |
 |---|---|---|
 | Decisions come from | The conversation + the agent's judgment | The docs only. Every decision cites a doc. |
-| Docs don't cover something | The agent fills the gap quietly | Logged as a blocker, not guessed |
+| Docs don't cover something | The agent fills the gap quietly | Hard to reverse: logged as a blocker and asked. Otherwise: a visible default. |
 | User corrects something | The spec is fixed | The docs are fixed, then the spec |
-| Output | A spec | A spec + docs that improve with every run |
+| Docs disagree with the code | Not reported | Listed as conflicts in the spec |
+| Reviewing a PR against it | Read the spec and judge | One verdict per decision ID |
+| Output | A spec | A checkable spec + docs that improve with every run |
 
 ## The loop
 
@@ -34,17 +38,20 @@ Then run `/hone <feature>` in the repo.
 /hone <feature>
         |
 explore repo + read docs     (AGENTS.md, CLAUDE.md, GLOSSARY.md, CONTEXT.md, README.md, docs/)
+note doc/code conflicts
         |
 for each decision the spec needs:
-  docs answer it          -> decide, cite the doc
-  docs don't answer it    -> append to .hone/blockers.jsonl
+  docs answer it                     -> decide, cite the doc
+  docs silent, hard to reverse       -> blocker in .hone/blockers.jsonl
+  docs silent, easy to change        -> default in .hone/blockers.jsonl
         |
-ask about all blockers in one batch
+ask about all blockers in one batch, list the defaults (override by number)
         |
 hone drafts doc updates      (section, ADR, assertion; lint rules as text)
 user approves, hone writes them
         |
-write the spec               (to-spec template + source tag per decision + coverage)
+write the spec               (to-spec template + ID, source and check per decision,
+                              conflicts, coverage, review format)
 publish                      (issue tracker if the docs name one, else .hone/specs/<slug>.md)
 ```
 
@@ -64,7 +71,21 @@ The blocker log is the record of every decision the docs couldn't make. It doubl
 }
 ```
 
-`status`: `open` -> `answered` (user replied) -> `documented` (answer landed in the docs).
+`status`: `open` -> `answered` (user replied) -> `documented` (answer landed in the docs), or `defaulted` (a default the user let stand; it doesn't touch the docs, but later specs reuse it).
+
+## When hone asks
+
+A decision the docs don't settle is a blocker only if it's hard to reverse (a public API or response contract, a schema or stored-data format, env var or file names, a dependency other code relies on, security or failure behavior), contradicts a doc, or the request is too ambiguous for a default. Everything else gets a default that's listed before the spec is written.
+
+## Reviewing against the spec
+
+Each decision reads `**D3** <decision> [source] Check: <what a reviewer observes>`. The spec ends with a Review section asking for one line per decision:
+
+```
+D3: implemented | violated | missing | unknown | out of scope — <evidence>
+```
+
+Any reviewer can fill it in, including the Spec axis of `code-review`.
 
 ## Where answers go
 
@@ -83,7 +104,7 @@ hone drafts every doc update and writes only what you approve.
 
 ## Metric
 
-**Docs coverage:** the share of a spec's decisions the docs could make without asking. Every spec ends with `Docs coverage: n/m`. It should go up over time on the same repo.
+**Docs coverage:** the share of a spec's decisions the docs could make without asking. Every spec ends with `Docs coverage: n/m (docs n · defaults d · blockers b)`. It should go up over time on the same repo.
 
 ## Eval: Backstage ADRs
 
@@ -101,14 +122,15 @@ What it shows:
 - hone never made a wrong call silently. Both `to-spec` runs quietly dropped `cross-fetch` in isomorphic packages, which the real ADR keeps; hone suggested the same thing but asked first.
 - The docs at those commits could settle only 2 of the 14 points. ADRs record new decisions, so most gaps are real gaps.
 - A stronger model makes hone's suggestions better (11 → 13 of 14), but not its question count.
-- hone asks too much: about 50 questions to cover 14 real decisions. Cutting that down is the next thing to fix.
+- hone asked too much: about 50 questions to cover 14 real decisions. v2 blocks only on hard-to-reverse decisions and turns the rest into defaults; it hasn't been re-evaluated yet.
 
 Caveats: one run per cell, 5 ADRs, scored by one reviewer (Claude), and every run also saw the runner's personal agent instructions. Some `to-spec` hits look memorized: `catalog-info.yaml` appears nowhere in the ADR008 snapshot, and one Opus run proposed an ADR title almost word for word the real one. Treat the `to-spec` scores as an upper bound.
 
 ## Next
 
-1. Run it on one repo for two weeks of real specs.
-2. Review the log: what kept coming up, what got documented, did coverage go up.
+1. Rerun the Backstage eval with v2: question count, whether `cross-fetch` still blocks, conflicts found.
+2. Review real ADR-implementing PRs (and broken variants) against a hone spec, with and without it.
+3. Run it on one repo for two weeks of real specs, then review the log: what kept coming up, what got documented, did coverage go up.
 
 ## Builds on
 
